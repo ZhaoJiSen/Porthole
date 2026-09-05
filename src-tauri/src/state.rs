@@ -20,14 +20,14 @@ pub struct SessionHandle {
     cancellation: CancellationToken,
 
     // 发送者
-    input: Option<mpsc::Sender<Vec<u8>>>,
+    input: mpsc::Sender<Vec<u8>>,
 }
 
 /// 全部活动终端会话的注册表。
 ///
 /// Arc：多个 Tauri command 共享同一个注册表。
 /// RwLock：允许多个读取操作并发，但插入/删除时独占写锁。
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SessionManager {
     pub sessions: Arc<RwLock<HashMap<Uuid, SessionHandle>>>,
 }
@@ -69,10 +69,10 @@ impl SessionManager {
 
 impl SessionHandle {
     /// 创建一个新会话及其独立取消信号
-    pub fn new(kind: SessionKind) -> Self {
+    pub fn new(kind: SessionKind, input: mpsc::Sender<Vec<u8>>) -> Self {
         Self {
             kind,
-            input: None,
+            input,
             cancellation: CancellationToken::new(),
         }
     }
@@ -82,24 +82,15 @@ impl SessionHandle {
         self.cancellation.cancel()
     }
 
-    pub fn with_input(kind: SessionKind, input: mpsc::Sender<Vec<u8>>) -> Self {
-        Self {
-            kind,
-            cancellation: CancellationToken::new(),
-            input: Some(input),
-        }
-    }
-
     pub async fn send_input(&self, bytes: Vec<u8>) -> AppResult<()> {
-        let input = self
-            .input
-            .as_ref()
-            .ok_or_else(AppError::session_not_ready)?;
-
-        input
+        self.input
             .send(bytes)
             .await
             .map_err(|_| AppError::session_not_ready())
+    }
+
+    pub fn cancellation_token(&self) -> CancellationToken {
+        self.cancellation.clone()
     }
 }
 
